@@ -1,62 +1,138 @@
-import numpy as np
 import time
 from pathlib import Path
-    
+
 from pydrake.all import (
-    AbstractValue,
     AddMultibodyPlantSceneGraph,
     DiagramBuilder,
-    JointSliders,
-    LeafSystem,
     MeshcatVisualizer,
     Parser,
     StartMeshcat,
     Simulator,
-    MultibodyPlant
+    PackageMap, 
+    Role, 
+    RigidTransform
 )
-from pydrake.multibody.parsing import PackageMap
 from manipulation import running_as_notebook
 
-ur_description = Path(
-    "urdf_files_dataset/urdf_files/ros-industrial/xacro_generated/"
-    "universal_robots/ur_description"
-).resolve()
+from pydrake.geometry import Sphere
 
+# --------------------------------------------------
+# URDF
+# --------------------------------------------------
+
+ur_description = Path("ur_description").resolve()
+urdf_path = ur_description / "urdf" / "ur5.urdf"
 
 builder = DiagramBuilder()
-plant, scene_graph = AddMultibodyPlantSceneGraph(builder, time_step=1e-4)
-meshcat = StartMeshcat()
-parser = Parser(plant, scene_graph)
 
-package_map = PackageMap()
-package_map.Add("urdf_files", "/home/samuel/Documents/DrakeSims/urdf_files_dataset/urdf_files")
-parser.package_map().AddMap(package_map)
-
-
-# Load the URDF from the filesystem.
-parser.AddModels(
-    file_name=str(ur_description / "urdf/ur5.urdf")
+plant, scene_graph = AddMultibodyPlantSceneGraph(
+    builder,
+    time_step=1e-4,
 )
 
-plant.WeldFrames(plant.world_frame(), plant.GetFrameByName("base_link"))
+meshcat = StartMeshcat()
+
+meshcat.SetObject(
+    "/test_sphere",
+    Sphere(0.1)
+)
+
+meshcat.SetTransform(
+    "/test_sphere",
+    RigidTransform([0, 0, 0])
+)
+
+print(meshcat.web_url())
+
+
+parser = Parser(plant, scene_graph)
+
+# Tell Drake where package://ur_description points to.
+package_map = PackageMap()
+package_map.Add(
+    "ur_description",
+    str(ur_description)
+)
+parser.package_map().AddMap(package_map)
+
+# Load the URDF.
+model_instances = parser.AddModels(
+    file_name=str(urdf_path)
+)
+
+print("Models:", model_instances)
+print("Bodies:", plant.num_bodies())
+print("Frames:", plant.num_frames())
+
+
+plant.WeldFrames(
+    plant.world_frame(),
+    plant.GetFrameByName("base_link"),
+)
+
 plant.Finalize()
 
+inspector = scene_graph.model_inspector()
 
-# Adds the MeshcatVisualizer and wires it to the SceneGraph.
-visualizer = MeshcatVisualizer.AddToBuilder(builder, scene_graph, meshcat)
+print("Proximity geometries:",
+      inspector.NumGeometriesWithRole(Role.kProximity))
+
+print("Illustration geometries:",
+      inspector.NumGeometriesWithRole(Role.kIllustration))
+
+
+# --------------------------------------------------
+# Meshcat
+# --------------------------------------------------
+
+visualizer = MeshcatVisualizer.AddToBuilder(
+    builder,
+    scene_graph,
+    meshcat,
+)
+
+
+# --------------------------------------------------
+# Build diagram
+# --------------------------------------------------
 
 diagram = builder.Build()
 diagram.set_name("plant and scene_graph")
 
+
+# --------------------------------------------------
+# Context
+# --------------------------------------------------
+
 diag_context = diagram.CreateDefaultContext()
-context = plant.GetMyMutableContextFromRoot(diag_context)
-plant.SetPositions(context, [1.57, -0.66, -1.57, 0, 0, -1.6])
 
-#diagram.ForcedPublish(diag_context)
+plant_context = plant.GetMyMutableContextFromRoot(
+    diag_context
+)
 
-simulator = Simulator(diagram, diag_context)
+plant.SetPositions(
+    plant_context,
+    [1.57, -0.66, -1.57, 0, 0, -1.6],
+)
+
+
+# --------------------------------------------------
+# Simulation
+# --------------------------------------------------
+diagram.ForcedPublish(diag_context)
+
+simulator = Simulator(
+    diagram,
+    diag_context,
+)
+
 simulator.set_target_realtime_rate(1.0)
-simulator.AdvanceTo(10.0 if running_as_notebook else 0.1)
 
+simulator.AdvanceTo(
+    10.0 if running_as_notebook else 0.1
+)
+
+
+# Keep Meshcat alive
 while True:
     time.sleep(1)
