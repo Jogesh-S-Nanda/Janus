@@ -14,7 +14,8 @@ from pydrake.all import (
     Simulator,
     MultibodyPlant, 
     InverseDynamicsController, 
-    Context
+    Context,
+    MeshcatVisualizerParams
 )
 from pydrake.multibody.parsing import PackageMap
 from manipulation import running_as_notebook
@@ -39,7 +40,6 @@ class Controller(LeafSystem):
     def __init__(self):
         super().__init__()
 
-
 class Manipulator:
     def __init__(self, urdf_package: str, urdf_loc: str):
         # basic building blocks
@@ -51,7 +51,7 @@ class Manipulator:
         self.is_built = False
         
         # Load the URDF from the filesystem.
-        self.index = self._parser_setup(urdf_package, urdf_loc)
+        self.obj_index = self._parser_setup(urdf_package, urdf_loc)
 
         self.plant.WeldFrames(plant.world_frame(), self.plant.GetFrameByName("base_link"))
         self.plant.Finalize()
@@ -64,7 +64,7 @@ class Manipulator:
         self.parser.package_map().AddMap(package_map)
         index = self.parser.AddModels(
             file_name=str(urdf_path / urdf_loc)
-        )
+        )[0]
         return index
 
     def build(self, env: "Environment", name : str | None = None):
@@ -109,14 +109,19 @@ class Environment:
         self.meshcat = StartMeshcat()
         
     def _launch_in_scenario(self, robot: Manipulator):
-        self.visualizer = MeshcatVisualizer.AddToBuilder(robot.builder, robot.scene_graph, self.meshcat)
+        if robot.is_built:
+            raise RuntimeError("The visualizer must be added to the builder in the pre-build stage!")
+        self.visualizer = MeshcatVisualizer.AddToBuilder(robot.builder, robot.scene_graph, self.meshcat, MeshcatVisualizerParams(
+            publish_period=0.01
+        ))
 
     def setup_sim(self, robot: Manipulator, q_init):
         if not robot.is_built:
             raise RuntimeError("Cannot start simulation. You must call 'robot.build()' first!")
-        self.context = robot.diagram.CreateDefaultContext()
 
-        simulation = Simulation(robot, self)
+        # sim can alternatively be set by 
+
+        simulation = Simulation(robot)
         simulation.set_initial_conditions(q_init)
         simulation.publish()
 
@@ -135,9 +140,11 @@ class Environment:
 
 
 class Simulation:
-    def __init__(self, robot: Manipulator, env: Environment):
+    def __init__(self, robot: Manipulator):
+        if not robot.is_built:
+            raise RuntimeError("Cannot start simulation. You must call 'robot.build()' first!")
+        
         self.robot = robot
-        self.env = env
         self.context = robot.diagram.CreateDefaultContext()
         self.simulator = Simulator(robot.diagram, self.context)
 
