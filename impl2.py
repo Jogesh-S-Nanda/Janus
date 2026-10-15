@@ -15,26 +15,21 @@ urdf_path = Path(urdf_folder).resolve()
 # target_position = np.array([0.0, 0.0, 0.3])
 # #env.camera_config(camera_position, target_position)
 
-ur5 = Manipulator(urdf_folder, urdf_loc)
-
 env = Environment()
+
+ur5 = env.addManipulator(urdf_folder, urdf_loc)
+env.finalize_plant()
 
 kp = [10] * ur5.plant.num_positions()
 ki = [0.1] * ur5.plant.num_positions()
 kd = [2] * ur5.plant.num_positions()
-iiwa_controller = ur5.builder.AddSystem(InverseDynamicsController(ur5.plant, kp, ki, kd, False))
+
+iiwa_controller = env.builder.AddSystem(InverseDynamicsController(ur5.plant, kp, ki, kd, False))
 iiwa_controller.set_name("iiwa_controller")
 
-iiwa_model = ur5.obj_index
-ur5.builder.Connect(
-    ur5.plant.get_state_output_port(iiwa_model),
-    iiwa_controller.get_input_port_estimated_state(),
-)
-ur5.builder.Connect(
-    iiwa_controller.get_output_port_control(), ur5.plant.get_actuation_input_port()
-)
+ur5.add_controller(env, iiwa_controller)
 
-ur5.build(env)
+env.build()
 
 # # Create simulation
 q_init = np.array([0, -0.8, 1.57, 0, 0, 0])
