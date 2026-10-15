@@ -13,14 +13,13 @@ from pydrake.all import (
     StartMeshcat,
     Simulator,
     MultibodyPlant, 
-    InverseDynamicsController, 
     Context,
     MeshcatVisualizerParams
 )
 from pydrake.multibody.parsing import PackageMap
 from manipulation import running_as_notebook
 from pydrake.math import RigidTransform, RotationMatrix
-
+from controllers import InverseDynamics, Controller
 
 """
 UniversalRobot5Sim
@@ -34,11 +33,6 @@ UniversalRobot5Sim
 └── control
 
 """
-
-
-class Controller(LeafSystem):
-    def __init__(self):
-        super().__init__()
 
 class Manipulator:
     def __init__(self, plant, model_instance):
@@ -78,34 +72,38 @@ class Manipulator:
         q = self.get_positions(self.plant_context)
         v = self.get_velocities(self.plant_context)
         return np.concatenate([q, v])
-    
-    def add_controller(self, env: "Environment", controller: Controller):
+
+    def add_controller(self, env, ctrl_name, params):
+        if env.is_built:
+            raise RuntimeError("The environment is already built.")
+
+        if not env.is_finalized:
+            raise RuntimeError("Finalize the plant first.")
+
+        if ctrl_name == "InverseDynamics":
+            kp, ki, kd, has_reference_acceleration = params
+
+            controller = InverseDynamics(
+                kp, ki, kd, has_reference_acceleration
+            )
+        else:
+            raise ValueError(f"Unknown controller type: {ctrl_name}")
+
+        controller.build(self)
+        controller.system.set_name(ctrl_name)
+        env.builder.AddSystem(controller.system)
+        # Connect the appropriate ports here.
         env.builder.Connect(
             self.plant.get_state_output_port(self.model_instance),
-            controller.get_input_port_estimated_state(),
+            controller.system.get_input_port_estimated_state(),
         )
         env.builder.Connect(
-            controller.get_output_port_control(), self.plant.get_actuation_input_port()
+            controller.system.get_output_port_control(), self.plant.get_actuation_input_port()
         )
 
+        self.controller = controller
 
-        # kp = plant.num_positions() * [50]
-        # kd= plant.num_positions() * [20]
-        # ki = plant.num_positions() * [1]
-
-        # iiwa_controller = builder.AddSystem(InverseDynamicsController(plant, np.array(kp), np.array(ki), np.array(kd), False))
-        # iiwa_controller.set_name("iiwa_controller")
-        # builder.Connect(
-        #     plant.get_state_output_port(),
-        #     iiwa_controller.get_input_port_estimated_state(),
-        # )
-        # builder.Connect(
-        #     iiwa_controller.get_output_port_control(), plant.get_actuation_input_port()
-        # )
-
-        # iiwa_controller.GetInputPort("desired_state").FixValue(
-        # iiwa_controller.GetMyMutableContextFromRoot(diag_context), q_des
-        # ) 
+        return controller
 
 # Maybe we can make a simulation class later, and put context therein
 
@@ -123,6 +121,7 @@ class Environment:
             publish_period=0.01
         ))
         self.is_built = False
+        self.is_finalized = False
 
     def addManipulator(self, urdf_package: str, urdf_loc: str):
         # Load the URDF from the filesystem.
@@ -134,6 +133,7 @@ class Environment:
 
     def finalize_plant(self):
         self.plant.Finalize()
+        self.is_finalized = True
 
     def _parser_setup(self, urdf_package, urdf_loc):
         # create a package map
@@ -159,8 +159,6 @@ class Environment:
     def setup_sim(self, robot: Manipulator, q_init):
         if not self.is_built:
             raise RuntimeError("Cannot start simulation. You must call 'self.build()' first!")
-
-        # sim can alternatively be set by 
 
         simulation = Simulation(self)
         robot.bindContext(simulation)
@@ -197,3 +195,43 @@ class Simulation:
 
     def publish(self):
         self.env.diagram.ForcedPublish(self.context)
+
+
+"""
+
+import threading
+import time
+
+class MyRobotSimulation:
+    def __init__(self):
+        # Setup Drake diagram, plant, context, and simulator here...
+        self.simulator = Simulator(diagram)
+        self.context = self.simulator.get_mutable_context()
+        self.is_running = False
+
+    def _network_stream_loop(self):
+        # This runs on a separate thread
+        while self.is_running:
+            # Safely grab the current state out of the active context
+            state = self.plant.GetPositions(self.plant_context)
+            
+            # Send 'state' over UDP/TCP socket to Unity here...
+            
+            time.sleep(0.033) # Control your broadcast rate (e.g., 30 Hz)
+
+    def start_simulation(self, duration):
+        self.is_running = True
+        
+        # 1. Start the streaming thread simultaneously
+        stream_thread = threading.Thread(target=self._network_stream_loop)
+        stream_thread.start()
+        
+        try:
+            # 2. Hand over control to Drake's solver loop
+            self.simulator.AdvanceTo(duration)
+        finally:
+            # 3. Clean up the thread when AdvanceTo finishes
+            self.is_running = False
+            stream_thread.join()
+
+"""

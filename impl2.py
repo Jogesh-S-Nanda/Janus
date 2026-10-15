@@ -1,6 +1,7 @@
 from pathlib import Path
 from roboclass import Manipulator, Environment
-from pydrake.all import InverseDynamicsController 
+from controllers import InverseDynamics
+
 import time
 import numpy as np
 
@@ -20,14 +21,11 @@ env = Environment()
 ur5 = env.addManipulator(urdf_folder, urdf_loc)
 env.finalize_plant()
 
-kp = [10] * ur5.plant.num_positions()
-ki = [0.1] * ur5.plant.num_positions()
-kd = [2] * ur5.plant.num_positions()
+kp = 10
+ki = 0.1
+kd = 2
 
-iiwa_controller = env.builder.AddSystem(InverseDynamicsController(ur5.plant, kp, ki, kd, False))
-iiwa_controller.set_name("iiwa_controller")
-
-ur5.add_controller(env, iiwa_controller)
+iiwa_controller = ur5.add_controller(env, "InverseDynamics", [kp, ki, kd, False])
 
 env.build()
 
@@ -35,17 +33,10 @@ env.build()
 q_init = np.array([0, -0.8, 1.57, 0, 0, 0])
 x0 = np.hstack((0 *q_init + 1.57, 0 * q_init))
 sim = env.setup_sim(ur5, q_init)
-
-
-iiwa_controller.GetInputPort("desired_state").FixValue(
-    iiwa_controller.GetMyMutableContextFromRoot(sim.context), x0
-)
-
+iiwa_controller.set_ref(sim, x0)
 
 sim.run(5.0)
 #ur5.diagram.ForcedPublish(context)
-
-
 
 while True:
     time.sleep(1)
