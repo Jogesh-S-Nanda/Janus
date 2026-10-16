@@ -14,7 +14,8 @@ from pydrake.all import (
     Simulator,
     MultibodyPlant, 
     Context,
-    MeshcatVisualizerParams
+    MeshcatVisualizerParams,
+    ModelInstanceIndex
 )
 from pydrake.multibody.parsing import PackageMap
 from manipulation import running_as_notebook
@@ -35,7 +36,7 @@ UniversalRobot5Sim
 """
 
 class Manipulator:
-    def __init__(self, plant, model_instance):
+    def __init__(self, plant, model_instance: ModelInstanceIndex):
         self.plant = plant
         self.model_instance = model_instance
 
@@ -73,6 +74,15 @@ class Manipulator:
         v = self.get_velocities(self.plant_context)
         return np.concatenate([q, v])
 
+    def get_ee_frame(self):
+        """Returns the terminal end-effector frame of the manipulator."""
+        body_indices = self.plant.GetBodyIndices(self.model_instance)
+        if not body_indices:
+            raise RuntimeError(f"Model instance {self.model_instance} contains no bodies!")
+        
+        return self.plant.get_body(body_indices[-1]).body_frame()
+
+
     def add_controller(self, env, ctrl_name, params):
         if env.is_built:
             raise RuntimeError("The environment is already built.")
@@ -98,7 +108,7 @@ class Manipulator:
             controller.system.get_input_port_estimated_state(),
         )
         env.builder.Connect(
-            controller.system.get_output_port_control(), self.plant.get_actuation_input_port()
+            controller.system.get_output_port_control(), self.plant.get_actuation_input_port(self.model_instance)
         )
 
         self.controller = controller
@@ -123,28 +133,62 @@ class Environment:
         self.is_built = False
         self.is_finalized = False
 
+    
+    def _parser_setup(self, urdf_loc, urdf_package=None):
+        # create a package map if the map is given
+        if urdf_package:
+            package_map = PackageMap()
+            urdf_path = Path(urdf_package).resolve()
+            package_map.Add(urdf_package, urdf_path)
+            self.parser.package_map().AddMap(package_map)
+            index = self.parser.AddModels(
+                file_name=str(urdf_path / urdf_loc)
+            )[0]
+
+        #or else uses the url
+        else: 
+            index = self.parser.AddModels(url=urdf_loc)[0]
+        
+        return index
+
+    def get_model_base_frame(self, model_index: ModelInstanceIndex):
+        """
+        Finds and returns the base Frame object for any loaded model instance.
+        Raises an error if the model contains no bodies.
+        """
+        body_indices = self.plant.GetBodyIndices(model_index)
+        
+        if not body_indices:
+            raise RuntimeError(f"Model instance {model_index} contains no links/bodies!")
+            
+        # Safely extract the frame object of the first topological body
+        return self.plant.get_body(body_indices[0]).body_frame()
+
+
     def addManipulator(self, urdf_package: str, urdf_loc: str):
         # Load the URDF from the filesystem.
-        obj_index = self._parser_setup(urdf_package, urdf_loc)
-        self.plant.WeldFrames(self.plant.world_frame(), self.plant.GetFrameByName("base_link"))
+        obj_index = self._parser_setup(urdf_loc, urdf_package)
+        robot_base_frame = self.get_model_base_frame(obj_index)
+        self.plant.WeldFrames(self.plant.world_frame(), robot_base_frame)
 
         robot = Manipulator(self.plant, obj_index)
         return robot
 
+    def addGripper(self, urdf_loc: str, robot: Manipulator):
+        obj_index = self._parser_setup(urdf_loc)
+        gripper_base_frame = self.get_model_base_frame(obj_index)
+
+        if robot.model_instance is None:
+            raise AttributeError("There is no robot to attach to!")
+        
+        # Weld the gripper to the arm
+        self.plant.WeldFrames(robot.get_ee_frame(), gripper_base_frame)
+            
+        return obj_index
+
     def finalize_plant(self):
         self.plant.Finalize()
         self.is_finalized = True
-
-    def _parser_setup(self, urdf_package, urdf_loc):
-        # create a package map
-        package_map = PackageMap()
-        urdf_path = Path(urdf_package).resolve()
-        package_map.Add(urdf_package, urdf_path)
-        self.parser.package_map().AddMap(package_map)
-        index = self.parser.AddModels(
-            file_name=str(urdf_path / urdf_loc)
-        )[0]
-        return index
 
     def build(self, name : str | None = None):
         # Adds the MeshcatVisualizer and wires it to the SceneGraph.
@@ -235,3 +279,4 @@ class MyRobotSimulation:
             stream_thread.join()
 
 """
+

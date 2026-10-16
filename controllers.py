@@ -39,6 +39,6 @@ class InverseDynamics(Controller):
         return self.system
 
     def set_ref(self, sim: "Simulation", state_des):
-        self.system.GetInputPort("desired_state").FixValue(
+        self.system.get_input_port_desired_state().FixValue(
             self.system.GetMyMutableContextFromRoot(sim.context), state_des
         )

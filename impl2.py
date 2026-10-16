@@ -10,6 +10,7 @@ urdf_loc = f"urdf/{robot_name}.urdf"
 urdf_folder = "ur_description"
 urdf_path = Path(urdf_folder).resolve()
 
+gripper_url = "package://drake_models/wsg_50_description/sdf/schunk_wsg_50_with_tip.sdf"
 # # Position: [X, Y, Z] in meters relative to world frame
 # camera_position = np.array([0.05, 0.0, 0.02])
 # # Target: [X, Y, Z] location the camera focuses on (e.g., base of the arm)
@@ -19,6 +20,7 @@ urdf_path = Path(urdf_folder).resolve()
 env = Environment()
 
 ur5 = env.addManipulator(urdf_folder, urdf_loc)
+gripper = env.addGripper(gripper_url, ur5)
 env.finalize_plant()
 
 kp = 10
