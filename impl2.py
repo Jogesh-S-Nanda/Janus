@@ -21,21 +21,32 @@ env = Environment()
 
 ur5 = env.addManipulator(urdf_folder, urdf_loc)
 gripper = env.addGripper(gripper_url, ur5)
+# brick = env.addObject(
+#     urdf_loc="package://drake_models/manipulation_station/061_foam_brick.sdf",
+#     name="foam_brick",
+#     xyz=np.array([0.6, 0.0, 0.05]),   # 5 cm above the table
+#     rpy=np.array([0.0, 0.0, 0.0]),
+# )
 env.finalize_plant()
 
 kp = 10
 ki = 0.1
 kd = 2
 
-iiwa_controller = ur5.add_controller(env, "InverseDynamics", [kp, ki, kd, False])
+ur5_controller = ur5.add_controller(env, "InverseDynamics", [kp, ki, kd, False])
 
 env.build()
 
 # # Create simulation
-q_init = np.array([0, -0.8, 1.57, 0, 0, 0])
-x0 = np.hstack((0 *q_init + 1.57, 0 * q_init))
+q_init = np.array([0, -0.8, 1.57, 0, 0, 0, 0, 0])
+x0 = np.hstack((q_init + np.r_[1.57, np.zeros(len(q_init)-1)], 0 * q_init))
+
+print("q_init size:", len(q_init))
+print("model_instance positions:", ur5.plant.num_positions(ur5.model_instance))
+print("full plant positions:", ur5.plant.num_positions())
+
 sim = env.setup_sim(ur5, q_init)
-iiwa_controller.set_ref(sim, x0)
+ur5_controller.set_ref(sim, x0)
 
 sim.run(5.0)
 #ur5.diagram.ForcedPublish(context)

@@ -55,8 +55,12 @@ class Manipulator:
 
     def set_positions(self, q):
         self.plant.SetPositions(
-            self.plant_context, self.model_instance, q
+            self.plant_context, q
         )
+
+    """
+    you are controlling the plant as a whole with InverseDynamics, how do you fix this?
+    """
 
     def set_velocities(self, v):
         self.plant.SetVelocities(
@@ -104,13 +108,13 @@ class Manipulator:
         env.builder.AddSystem(controller.system)
         # Connect the appropriate ports here.
         env.builder.Connect(
-            self.plant.get_state_output_port(self.model_instance),
+            self.plant.get_state_output_port(),          # no model_instance
             controller.system.get_input_port_estimated_state(),
         )
         env.builder.Connect(
-            controller.system.get_output_port_control(), self.plant.get_actuation_input_port(self.model_instance)
+            controller.system.get_output_port_control(),
+            self.plant.get_actuation_input_port(),       # no model_instance
         )
-
         self.controller = controller
 
         return controller
@@ -181,9 +185,44 @@ class Environment:
         if robot.model_instance is None:
             raise AttributeError("There is no robot to attach to!")
         
+
         # Weld the gripper to the arm
         self.plant.WeldFrames(robot.get_ee_frame(), gripper_base_frame)
+
             
+        return obj_index
+
+    def addObject(self, urdf_loc: str, name: str = "object",
+                xyz: np.ndarray = np.zeros(3),
+                rpy: np.ndarray = np.zeros(3)):
+        """
+        Add a free-floating object to the plant.
+
+        Args:
+            urdf_loc: path to URDF/SDF/mesh file.
+            name:     name for the model instance (for later lookup).
+            xyz:      initial world position [m].
+            rpy:      initial world orientation as roll-pitch-yaw [rad].
+
+        Returns:
+            Model instance index of the added object.
+        """
+        if self.plant.is_finalized():
+            raise RuntimeError("Cannot add object after plant.Finalize().")
+
+        obj_index = self._parser_setup(urdf_loc)
+        self.plant.SetModelInstanceName(obj_index, name)
+
+        # The object should be a free body: pick its first (root) body
+        body_indices = self.plant.GetBodyIndices(obj_index)
+        if len(body_indices) == 0:
+            raise RuntimeError(f"Object '{name}' has no bodies — bad URDF?")
+
+        X_WO = RigidTransform(RollPitchYaw(rpy).ToRotationMatrix(), xyz)
+        self.plant.SetDefaultFreeBodyPose(
+            self.plant.get_body(body_indices[0]), X_WO
+        )
+
         return obj_index
 
     def finalize_plant(self):

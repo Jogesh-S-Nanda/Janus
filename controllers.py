@@ -22,7 +22,7 @@ class InverseDynamics(Controller):
     def build(self, robot: "Manipulator"):
         plant = robot.plant
 
-        nq = plant.num_positions(robot.model_instance)
+        nq = plant.num_positions()   
 
         kp = np.broadcast_to(self.kp, nq).copy()
         ki = np.broadcast_to(self.ki, nq).copy()
