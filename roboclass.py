@@ -1,7 +1,9 @@
 import numpy as np
 import time
 from pathlib import Path
-    
+
+from pub_node import setup_joint_state_publisher, publish_joint_state, close_joint_state_publisher
+
 from pydrake.all import (
     AbstractValue,
     AddMultibodyPlantSceneGraph,
@@ -246,6 +248,7 @@ class Environment:
         simulation = Simulation(self)
         robot.bindContext(simulation)
         robot.set_initial_conditions(q_init)
+        simulation.start_publisher(robot)
         simulation.publish()
 
         return simulation
@@ -270,14 +273,58 @@ class Simulation:
         self.env = env
         self.context = env.diagram.CreateDefaultContext()
         self.simulator = Simulator(env.diagram, self.context)
+        self.publisher_context = None
+        self.publisher_socket = None
+        self.publisher_rate_hz = 50.0
+        self.publisher_robot = None
+
+    def start_publisher(self, robot: Manipulator, host="127.0.0.1", port=5555, rate_hz=50.0):
+        self.publisher_context, self.publisher_socket = setup_joint_state_publisher(host, port)
+        self.publisher_robot = robot
+        self.publisher_rate_hz = float(rate_hz)
+        return self.publisher_socket
+
+    def stop_publisher(self):
+        close_joint_state_publisher(self.publisher_context, self.publisher_socket)
+        self.publisher_context = None
+        self.publisher_socket = None
+        self.publisher_robot = None
+
+    def publish_joint_angles(self, time_s=None):
+        if self.publisher_socket is None or self.publisher_robot is None:
+            return
+
+        if time_s is None:
+            time_s = self.simulator.get_context().get_time()
+
+        positions = self.publisher_robot.get_positions()
+        publish_joint_state(self.publisher_socket, time_s, positions)
 
     def run(self, duration, running_as_notebook=True):
         self.simulator.set_target_realtime_rate(1.0)
         self.simulator.Initialize()
-        self.simulator.AdvanceTo(duration if running_as_notebook else 0.1)
+
+        if not running_as_notebook:
+            duration = min(duration, 0.1)
+
+        publish_period = None
+        if self.publisher_socket is not None:
+            publish_period = 1.0 / max(self.publisher_rate_hz, 1e-9)
+
+        if publish_period is not None:
+            self.publish_joint_angles(self.simulator.get_context().get_time())
+
+        t = self.simulator.get_context().get_time()
+        while t < duration:
+            next_t = duration if publish_period is None else min(t + publish_period, duration)
+            self.simulator.AdvanceTo(next_t)
+            t = self.simulator.get_context().get_time()
+            if self.publisher_socket is not None:
+                self.publish_joint_angles(t)
 
     def publish(self):
         self.env.diagram.ForcedPublish(self.context)
+        self.publish_joint_angles(self.context.get_time())
 
 
 """
