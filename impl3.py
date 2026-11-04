@@ -30,9 +30,9 @@ gripper = env.addGripper(gripper_url, ur5)
 # )
 env.finalize_plant()
 
-kp = 10
-ki = 0.1
-kd = 2
+kp = 50
+ki = 2
+kd = 10
 
 ur5_controller = ur5.add_controller(env, "InverseDynamics", [kp, ki, kd, False])
 

@@ -278,7 +278,7 @@ class Simulation:
         self.publisher_rate_hz = 50.0
         self.publisher_robot = None
 
-    def start_publisher(self, robot: Manipulator, host="127.0.0.1", port=5555, rate_hz=50.0):
+    def start_publisher(self, robot: Manipulator, host="0.0.0.0", port=5555, rate_hz=50.0):
         self.publisher_context, self.publisher_socket = setup_joint_state_publisher(host, port)
         self.publisher_robot = robot
         self.publisher_rate_hz = float(rate_hz)
