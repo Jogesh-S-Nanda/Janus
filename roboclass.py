@@ -38,23 +38,28 @@ UniversalRobot5Sim
 """
 
 class Manipulator:
+    # Creates a Drake model wrapper so the robot state can be read, set, and controlled inside the digital twin.
     def __init__(self, plant, model_instance: ModelInstanceIndex):
         self.plant = plant
         self.model_instance = model_instance
 
+    # Connects the robot instance to the active simulation context so every query targets the live twin state.
     def bindContext(self, simulation: "Simulation"):
         self.plant_context = self.plant.GetMyMutableContextFromRoot(simulation.context)
 
+    # Returns the current joint positions of the robot as the twin's measured state.
     def get_positions(self):
         return self.plant.GetPositions(
             self.plant_context, self.model_instance
         )
 
+    # Returns the current joint velocities for estimating motion in the virtual robot.
     def get_velocities(self):
         return self.plant.GetVelocities(
             self.plant_context, self.model_instance
         )
 
+    # Sets the robot's joint angles to match a commanded pose in the digital twin.
     def set_positions(self, q):
         self.plant.SetPositions(
             self.plant_context, q
@@ -64,22 +69,26 @@ class Manipulator:
     you are controlling the plant as a whole with InverseDynamics, how do you fix this?
     """
 
+    # Updates the robot's joint velocity state to reflect a new simulated motion snapshot.
     def set_velocities(self, v):
         self.plant.SetVelocities(
             self.plant_context, self.model_instance, v
         )
 
+    # Applies the initial pose and velocity conditions needed to boot the virtual robot into a known state.
     def set_initial_conditions(self, q_init, v_init=None):
         self.set_positions(q_init)
 
         if v_init is not None:
             self.set_velocities(v_init)
 
+    # Combines joint position and velocity into a single state vector for simulation and control.
     def get_state(self):
         q = self.get_positions(self.plant_context)
         v = self.get_velocities(self.plant_context)
         return np.concatenate([q, v])
 
+    # Returns the end-effector frame used to locate tool attachments and motion targets in the twin.
     def get_ee_frame(self):
         """Returns the terminal end-effector frame of the manipulator."""
         body_indices = self.plant.GetBodyIndices(self.model_instance)
@@ -89,6 +98,7 @@ class Manipulator:
         return self.plant.get_body(body_indices[-1]).body_frame()
 
 
+    # Attaches a control policy to the robot so the virtual system can be driven by a controller.
     def add_controller(self, env, ctrl_name, params):
         if env.is_built:
             raise RuntimeError("The environment is already built.")
@@ -124,6 +134,7 @@ class Manipulator:
 # Maybe we can make a simulation class later, and put context therein
 
 class Environment:
+    # Initializes the Drake scene, Meshcat viewer, and parser used to assemble the robot twin.
     def __init__(self):
         # basic building blocks
         self.meshcat = StartMeshcat()
@@ -139,7 +150,7 @@ class Environment:
         self.is_built = False
         self.is_finalized = False
 
-    
+    # Loads a URDF into the environment and configures package paths so the robot model appears in the twin.
     def _parser_setup(self, urdf_loc, urdf_package=None):
         # create a package map if the map is given
         if urdf_package:
@@ -157,6 +168,7 @@ class Environment:
         
         return index
 
+    # Finds the frame at a model's base so the robot can be anchored in the world and connected to tools.
     def get_model_base_frame(self, model_index: ModelInstanceIndex):
         """
         Finds and returns the base Frame object for any loaded model instance.
@@ -171,6 +183,7 @@ class Environment:
         return self.plant.get_body(body_indices[0]).body_frame()
 
 
+    # Adds a manipulator model to the plant and fixes it to the world frame for a stable digital twin.
     def addManipulator(self, urdf_package: str, urdf_loc: str):
         # Load the URDF from the filesystem.
         obj_index = self._parser_setup(urdf_loc, urdf_package)
@@ -180,6 +193,7 @@ class Environment:
         robot = Manipulator(self.plant, obj_index)
         return robot
 
+    # Attaches a gripper to the robot's end-effector to complete the virtual toolchain.
     def addGripper(self, urdf_loc: str, robot: Manipulator):
         obj_index = self._parser_setup(urdf_loc)
         gripper_base_frame = self.get_model_base_frame(obj_index)
@@ -194,6 +208,7 @@ class Environment:
             
         return obj_index
 
+    # Adds a free body such as an object to the plant so the twin can represent the workcell scene.
     def addObject(self, urdf_loc: str, name: str = "object",
                 xyz: np.ndarray = np.zeros(3),
                 rpy: np.ndarray = np.zeros(3)):
@@ -227,10 +242,12 @@ class Environment:
 
         return obj_index
 
+    # Finalizes the plant to lock the simulation topology before building the runtime diagram.
     def finalize_plant(self):
         self.plant.Finalize()
         self.is_finalized = True
 
+    # Builds the diagram that connects the plant, scene graph, and visualizer into a runnable twin.
     def build(self, name : str | None = None):
         # Adds the MeshcatVisualizer and wires it to the SceneGraph.
         self.diagram = self.builder.Build()
@@ -241,6 +258,7 @@ class Environment:
         
         self.is_built = True
 
+    # Starts a simulation instance with the robot initial conditions and publisher configured for the twin.
     def setup_sim(self, robot: Manipulator, q_init):
         if not self.is_built:
             raise RuntimeError("Cannot start simulation. You must call 'self.build()' first!")
@@ -253,6 +271,7 @@ class Environment:
 
         return simulation
 
+    # Positions the virtual camera so the digital twin can be viewed from the same angle as the real system.
     def camera_config(self, camera_position: np.ndarray, target_position: np.ndarray):
         if camera_position.shape != (3,) or target_position.shape != (3,):
             raise ValueError("camera_position and target_position must be a 1D NumPy array with exactly 3 elements")
@@ -266,6 +285,7 @@ class Environment:
 
 
 class Simulation:
+    # Creates a simulator object bound to the built environment so the twin can advance in time.
     def __init__(self, env: Environment):
         if not env.is_built:
             raise RuntimeError("Cannot start simulation. You must call 'robot.build()' first!")
@@ -278,18 +298,21 @@ class Simulation:
         self.publisher_rate_hz = 50.0
         self.publisher_robot = None
 
+    # Starts the joint-state publisher so the robot state can be streamed from the digital twin.
     def start_publisher(self, robot: Manipulator, host="0.0.0.0", port=5555, rate_hz=50.0):
         self.publisher_context, self.publisher_socket = setup_joint_state_publisher(host, port)
         self.publisher_robot = robot
         self.publisher_rate_hz = float(rate_hz)
         return self.publisher_socket
 
+    # Closes the publisher cleanly when the twin is no longer streaming state.
     def stop_publisher(self):
         close_joint_state_publisher(self.publisher_context, self.publisher_socket)
         self.publisher_context = None
         self.publisher_socket = None
         self.publisher_robot = None
 
+    # Publishes the latest joint angles to connected subscribers as the robot's digital state.
     def publish_joint_angles(self, time_s=None):
         if self.publisher_socket is None or self.publisher_robot is None:
             return
@@ -300,6 +323,7 @@ class Simulation:
         positions = self.publisher_robot.get_positions()
         publish_joint_state(self.publisher_socket, time_s, positions)
 
+    # Advances the twin over time while periodically broadcasting the robot state to external consumers.
     def run(self, duration, running_as_notebook=True):
         self.simulator.set_target_realtime_rate(1.0)
         self.simulator.Initialize()
@@ -322,6 +346,7 @@ class Simulation:
             if self.publisher_socket is not None:
                 self.publish_joint_angles(t)
 
+    # Forces an immediate render so the current state is visible in the visualization and subscribed clients.
     def publish(self):
         self.env.diagram.ForcedPublish(self.context)
         self.publish_joint_angles(self.context.get_time())

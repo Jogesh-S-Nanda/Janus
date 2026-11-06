@@ -2,6 +2,7 @@ import zmq
 import json
 import time
 
+# Listens for robot-state messages from the digital twin and prints the live joint angles for debugging or monitoring.
 def run_subscriber():
     # 1. Initialize ZMQ context and socket
     context = zmq.Context()
