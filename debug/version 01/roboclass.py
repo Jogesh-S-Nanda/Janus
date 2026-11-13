@@ -2,7 +2,16 @@ import numpy as np
 import time
 from pathlib import Path
 
-from pub_node import setup_joint_state_publisher, publish_joint_state, close_joint_state_publisher
+if __package__:
+    try:
+        from .pub_node import setup_joint_state_publisher, publish_joint_state, close_joint_state_publisher
+        from .controllers import InverseDynamics, Controller
+    except ImportError:  # pragma: no cover - fallback for older direct-execution layouts
+        from pub_node import setup_joint_state_publisher, publish_joint_state, close_joint_state_publisher
+        from controllers import InverseDynamics, Controller
+else:
+    from pub_node import setup_joint_state_publisher, publish_joint_state, close_joint_state_publisher
+    from controllers import InverseDynamics, Controller
 
 from pydrake.all import (
     AbstractValue,
@@ -22,7 +31,6 @@ from pydrake.all import (
 from pydrake.multibody.parsing import PackageMap
 from manipulation import running_as_notebook
 from pydrake.math import RigidTransform, RotationMatrix
-from controllers import InverseDynamics, Controller
 
 """
 UniversalRobot5Sim

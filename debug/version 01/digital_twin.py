@@ -1,6 +1,16 @@
 from pathlib import Path
-from roboclass import Manipulator, Environment
-from controllers import InverseDynamics
+
+if __package__:
+    try:
+        from .roboclass import Manipulator, Environment
+        from .controllers import InverseDynamics
+    except ImportError:  # pragma: no cover - fallback for older direct-execution layouts
+        from roboclass import Manipulator, Environment
+        from controllers import InverseDynamics
+else:
+    from roboclass import Manipulator, Environment
+    from controllers import InverseDynamics
+
 from pydrake.all import JointSliders, StateInterpolatorWithDiscreteDerivative
 
 import time
